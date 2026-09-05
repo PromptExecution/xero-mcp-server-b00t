@@ -18,6 +18,8 @@
     "build": "tsc && shx chmod +x dist/*.js",
     "prepare": "npm run build",
     "watch": "tsc --watch",
+    "start": "node dist/index.js",
+    "start:http": "node dist/index.http.js",
     "lint:fix": "eslint --fix",
     "lint": "eslint ."
   },
