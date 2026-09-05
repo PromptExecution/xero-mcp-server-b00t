@@ -5,7 +5,7 @@
 //   az login
 //   az group create --name <rg> --location australiaeast
 //   az deployment group create --resource-group <rg> --template-file infra/main.bicep \
-//     --parameters xeroClientId=<id> xeroClientSecret=<secret>
+//     --parameters xeroClientId=<id> xeroClientSecret=<secret> mcpAuthToken=<random-token>
 
 @description('Azure region for all resources')
 param location string = resourceGroup().location
@@ -23,6 +23,10 @@ param xeroClientId string
 @description('Xero OAuth2 client secret (stored in Key Vault)')
 @secure()
 param xeroClientSecret string
+
+@description('Bearer token required on /mcp once ingress is external — see MCP_AUTH_TOKEN in src/index.http.ts (#2/#5). Generate with e.g. `openssl rand -hex 32`.')
+@secure()
+param mcpAuthToken string
 
 // ── Key Vault ────────────────────────────────────────────────────────────────
 
@@ -47,6 +51,12 @@ resource kvSecretClientSecret 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
   parent: kv
   name: 'xero-client-secret'
   properties: { value: xeroClientSecret }
+}
+
+resource kvSecretMcpAuthToken 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
+  parent: kv
+  name: 'mcp-auth-token'
+  properties: { value: mcpAuthToken }
 }
 
 // ── Log Analytics ─────────────────────────────────────────────────────────────
@@ -114,7 +124,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
         transport: 'http'
         // Sticky sessions ensure MCP SSE streams stay on the same replica.
         // Only matters if min replicas > 1; harmless at scale-to-zero.
-        stickySession: { affinity: 'sticky' }
+        stickySessions: { affinity: 'sticky' }
       }
       secrets: [
         {
@@ -127,6 +137,11 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
           keyVaultUrl: kvSecretClientSecret.properties.secretUri
           identity: identity.id
         }
+        {
+          name: 'mcp-auth-token'
+          keyVaultUrl: kvSecretMcpAuthToken.properties.secretUri
+          identity: identity.id
+        }
       ]
     }
     template: {
@@ -137,6 +152,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
           env: [
             { name: 'XERO_CLIENT_ID',     secretRef: 'xero-client-id' }
             { name: 'XERO_CLIENT_SECRET', secretRef: 'xero-client-secret' }
+            { name: 'MCP_AUTH_TOKEN',     secretRef: 'mcp-auth-token' }
             { name: 'NODE_ENV',           value: 'production' }
           ]
           resources: { cpu: json('0.25'), memory: '0.5Gi' }
